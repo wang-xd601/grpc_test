@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option go_package = "";
+option java_multiple_files = true;
+option java_package = "io.grpc.test.process";
+option java_outer_classname = "TestProto";
+option objc_class_prefix = "RTG";
+
+package process;
+
+// Interface exported by the server.
+service Process {
+  rpc create (CreateRequest) returns (CreateReply) {}
+}
+message CreateRequest {
+  bytes data = 1;
+}
+message CreateReply {
+  string id = 1;
+}
