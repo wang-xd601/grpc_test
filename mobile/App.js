@@ -4,17 +4,34 @@ import {
   StyleSheet,
   Text,
   StatusBar,
-  NativeModules,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Identity, Process, Event } from './GRPCService';
+import { grpc } from '@improbable-eng/grpc-web';
+import { ReactNativeTransport } from '@improbable-eng/grpc-web-react-native-transport';
 
-const { ServiceManager } = NativeModules;
+import { IdentityPBClient } from './generated/identity_pb_service';
+import { ProcessClient } from './generated/process_pb_service';
+import { EventClient } from './generated/event_pb_service';
+import { Identity, RetrieveRequest } from './generated/identity_pb';
+import { CreateRequest as CreateProcessRequest } from './generated/process_pb';
+import { CreateRequest as CreateEventRequest } from './generated/event_pb';
 
 const hostname = '192.168.1.180';
-const port = 50050;
+const port = 8080;
 const token = 'jwt-token';
+
+grpc.setDefaultTransport(ReactNativeTransport({ withCredentials: true }));
+
+const grpcPromise = (client, method, request, metadata) =>
+  new Promise((resolve, reject) => {
+    client[method](request, metadata, (err, res) => {
+      if (err) {
+        return reject(err);
+      }
+      return resolve(res);
+    });
+  });
 
 const App = () => {
   const [log, setLog] = useState('');
@@ -22,33 +39,65 @@ const App = () => {
   const onCommunicate = async () => {
     try {
       let logMessage = '';
-      ServiceManager.connectServer(hostname, port, token);
+
+      var metadata = { authorization: token };
 
       // Create Identity
-      let identity = new Identity({ phoneNumber: '+13035551234' });
+      let identity = new Identity();
+      identity.setPhoneNumber('+13035551234');
 
-      const processReply = await Process.Create({ data: identity });
+      const host = `http://${hostname}:${port}`;
+      const processClient = new ProcessClient(host);
+      const identityClient = new IdentityPBClient(host);
+      const eventClient = new EventClient(host);
 
-      logMessage += `Process ID: ${processReply.id}\n`;
+      const processCreate = new CreateProcessRequest();
+      processCreate.setData(identity.serializeBinary());
+      const processReply = await grpcPromise(
+        processClient,
+        'create',
+        processCreate,
+        metadata,
+      );
+      logMessage += `Process ID: ${processReply.getId()}\n`;
 
-      identity = await Identity.Retrieve({ id: processReply.id });
-      logMessage += `Phone number: ${identity.phoneNumber}\n`;
+      const identityRetrieve = new RetrieveRequest();
+      identityRetrieve.setId(processReply.getId());
+      identity = await grpcPromise(
+        identityClient,
+        'retrieve',
+        identityRetrieve,
+        metadata,
+      );
+      logMessage += `Phone number: ${identity.getPhoneNumber()}\n`;
 
-      // Create Event
-      identity = new Identity({ phoneNumber: '+17205559876' });
+      identity = new Identity();
+      identity.setPhoneNumber('+17205559876');
 
-      const eventReply = await Event.Create({
-        processId: processReply.id,
-        data: identity,
-      });
+      const eventRequest = new CreateEventRequest();
+      eventRequest.setData(identity.serializeBinary());
+      eventRequest.setProcessId(processReply.getId());
 
-      logMessage += `Event ID: ${eventReply.id}\n`;
+      const eventReply = await grpcPromise(
+        eventClient,
+        'create',
+        eventRequest,
+        metadata,
+      );
 
-      identity = await Identity.Retrieve({ id: processReply.id });
-      logMessage += `Phone number: ${identity.phoneNumber}\n`;
+      logMessage += `Event ID: ${eventReply.getId()}\n`;
+
+      identity = await grpcPromise(
+        identityClient,
+        'retrieve',
+        identityRetrieve,
+        metadata,
+      );
+      logMessage += `Phone number: ${identity.getPhoneNumber()}\n`;
 
       setLog(logMessage);
     } catch (e) {
+      console.log(e);
       setLog(e.message);
     }
   };
